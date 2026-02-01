@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+temp_audio/
+models/*.pkl
+results/
+extract_prd.py

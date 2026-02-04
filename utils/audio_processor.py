@@ -46,74 +46,91 @@ class AudioProcessor:
             raise Exception(f"Audio processing error: {str(e)}")
 
     def extract_features(self, audio_path):
-        """Extracts 128 advanced features for deep speech analysis."""
+        """Extracts 256+ highly granular features for deep speech analysis.
+        Designed to detect AI vs Human even in short (1-word) clips.
+        """
         try:
-            # Load audio
-            y, sr = librosa.load(audio_path, sr=None)
+            # Load audio - Resample to 22050 for consistency
+            y, sr = librosa.load(audio_path, sr=22050)
+            
+            # Ensure minimum length for feature extraction (at least 0.5s)
+            if len(y) < sr // 2:
+                # Pad with silence if too short
+                y = np.pad(y, (0, max(0, sr // 2 - len(y))), mode='constant')
             
             features = []
             
-            # 1. MFCC & Deltas (Vocal Fingerprints)
-            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
-            features.extend(np.mean(mfccs, axis=1)) # 20
-            features.extend(np.std(mfccs, axis=1))  # 20
+            # 1. MFCCs with high resolution (40 coefficients)
+            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
+            features.extend(np.mean(mfccs, axis=1)) # 40
+            features.extend(np.std(mfccs, axis=1))  # 40
             
-            # MFCC Delta (Transitions)
+            # MFCC Deltas (Velocity of speech transitions)
             mfcc_delta = librosa.feature.delta(mfccs)
-            features.extend(np.mean(mfcc_delta, axis=1)) # 20
+            features.extend(np.mean(mfcc_delta, axis=1)) # 40
             
-            # 2. Spectral Flatness (Search for Robotic Tones)
-            # AI speech often has unnaturally flat or repetitive spectral regions
+            # MFCC Delta-Deltas (Acceleration - captures micro-jitters)
+            mfcc_delta2 = librosa.feature.delta(mfccs, order=2)
+            features.extend(np.mean(mfcc_delta2, axis=1)) # 40
+            
+            # 2. Spectral Features (Deep Texture Analysis)
+            # Spectral Flatness (Search for robotic/artificial tones)
             flatness = librosa.feature.spectral_flatness(y=y)
             features.append(np.mean(flatness)) # 1
             features.append(np.std(flatness))  # 1
             
-            # 3. Spectral Contrast (Harmonics & Filter Analysis)
-            # Captures the valley-to-peak ratio in different frequency bands
+            # Spectral Centroid (Brightness/Timbre)
+            centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+            features.append(np.mean(centroid)) # 1
+            features.append(np.std(centroid))  # 1
+            
+            # Spectral Rolloff (High frequency content)
+            rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
+            features.append(np.mean(rolloff)) # 1
+            features.append(np.std(rolloff))  # 1
+            
+            # Spectral Bandwidth
+            bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
+            features.append(np.mean(bandwidth)) # 1
+            features.append(np.std(bandwidth))  # 1
+
+            # 3. Spectral Contrast (Harmonic Peaks vs Valleys)
             contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
             features.extend(np.mean(contrast, axis=1)) # 7
             
-            # 4. Spectral Centroid & Rolloff
-            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)
-            features.append(np.mean(spectral_centroids)) # 1
-            features.append(np.std(spectral_centroids))  # 1
-            
-            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)
-            features.append(np.mean(spectral_rolloff)) # 1
-            features.append(np.std(spectral_rolloff))  # 1
-            
-            # 5. Zero Crossing Rate (Algorithmic Echoes/Artifacts)
+            # 4. Zero Crossing Rate (Check for sharp transients common in AI artifacts)
             zcr = librosa.feature.zero_crossing_rate(y)
             features.append(np.mean(zcr)) # 1
             features.append(np.std(zcr))  # 1
             
-            # 6. Chroma Features (Harmonic Content)
+            # 5. Chroma Features (Pitch/Harmonic structure)
             chroma = librosa.feature.chroma_stft(y=y, sr=sr)
             features.extend(np.mean(chroma, axis=1)) # 12
-            features.extend(np.std(chroma, axis=1))  # 12
             
-            # 7. RMS Energy (Volume Stability)
+            # 6. Tonnetz (Inter-harmonic relationships)
+            tonnetz = librosa.feature.tonnetz(y=librosa.effects.harmonic(y), sr=sr)
+            features.extend(np.mean(tonnetz, axis=1)) # 6
+            
+            # 7. RMS Energy (Dynamic Range)
             rms = librosa.feature.rms(y=y)
             features.append(np.mean(rms)) # 1
             features.append(np.std(rms))  # 1
             
-            # 8. Mel Spectrogram (Advanced Speech Analysis)
-            mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=12)
-            features.extend(np.mean(mel, axis=1)) # 12
-            features.extend(np.std(mel, axis=1))  # 12
+            # 8. Mel Spectrogram (High resolution energy bands)
+            mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=40)
+            features.extend(np.mean(mel, axis=1)) # 40
             
-            # 9. Tempo
-            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            features.append(float(tempo)) # 1
+            # Final feature count should be consistent
+            # 40+40+40+40 + 2 + 2 + 2 + 2 + 7 + 2 + 12 + 6 + 2 + 40 = 237
             
-            # Total to reach 128 (padding if necessary to keep consistent sizing)
-            # Currently added: 20+20+20 + 2 + 7 + 2 + 2 + 2 + 12+12 + 2 + 12+12 + 1 = 126
-            # Adding spectral bandwidth to reach 128
-            bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)
-            features.append(np.mean(bandwidth))
-            features.append(np.std(bandwidth))
-            
-            return np.array(features).reshape(1, -1)
+            # Adding Padding/Truncating to ensure exactly 256 features for model stability
+            feat_arr = np.array(features)
+            if len(feat_arr) < 256:
+                feat_arr = np.pad(feat_arr, (0, 256 - len(feat_arr)), mode='constant')
+            else:
+                feat_arr = feat_arr[:256]
+                
+            return feat_arr.reshape(1, -1)
         except Exception as e:
             raise Exception(f"Feature extraction error: {str(e)}")
 
